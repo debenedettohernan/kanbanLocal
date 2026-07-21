@@ -1,6 +1,12 @@
 "use client";
 
-import { DndContext, DragEndEvent, useDraggable, useDroppable } from "@dnd-kit/core";
+import { DndContext, DragEndEvent, useDroppable } from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { FormEvent, useState } from "react";
 
@@ -38,6 +44,12 @@ const initialCards: Card[] = [
     details: "Cargar tarjetas de ejemplo claras para mostrar el flujo del tablero.",
   },
   {
+    id: "card-6",
+    columnId: "pendiente",
+    title: "Validar acciones simples",
+    details: "Comprobar que agregar, eliminar y renombrar columnas sea directo.",
+  },
+  {
     id: "card-3",
     columnId: "progreso",
     title: "Implementar arrastrar y soltar",
@@ -58,16 +70,21 @@ const initialCards: Card[] = [
 ];
 
 function KanbanCard({ card, onDelete }: { card: Card; onDelete: (id: string) => void }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } = useSortable({
     id: card.id,
+    data: { type: "card" },
   });
 
   return (
     <article
       ref={setNodeRef}
-      style={{ transform: CSS.Translate.toString(transform) }}
-      className={`rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_18px_45px_rgba(3,33,71,0.10)] transition ${
-        isDragging ? "z-50 rotate-1 opacity-80" : "hover:-translate-y-0.5 hover:shadow-[0_22px_55px_rgba(3,33,71,0.14)]"
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`rounded-3xl border bg-white p-4 shadow-[0_18px_45px_rgba(3,33,71,0.10)] transition ${
+        isOver ? "border-[#ecad0a] ring-4 ring-[#ecad0a]/20" : "border-slate-200"
+      } ${
+        isDragging
+          ? "z-50 rotate-1 opacity-80"
+          : "hover:-translate-y-0.5 hover:shadow-[0_22px_55px_rgba(3,33,71,0.14)]"
       }`}
     >
       <button
@@ -103,7 +120,10 @@ function KanbanColumn({
   onAddCard: (columnId: string, title: string, details: string) => void;
   onDeleteCard: (cardId: string) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: column.id });
+  const { setNodeRef, isOver } = useDroppable({
+    id: column.id,
+    data: { type: "column" },
+  });
   const [title, setTitle] = useState("");
   const [details, setDetails] = useState("");
 
@@ -138,9 +158,11 @@ function KanbanColumn({
       </div>
 
       <div className="mt-4 flex flex-1 flex-col gap-4">
-        {cards.map((card) => (
-          <KanbanCard key={card.id} card={card} onDelete={onDeleteCard} />
-        ))}
+        <SortableContext items={cards.map((card) => card.id)} strategy={verticalListSortingStrategy}>
+          {cards.map((card) => (
+            <KanbanCard key={card.id} card={card} onDelete={onDeleteCard} />
+          ))}
+        </SortableContext>
         {cards.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-[#209dd7]/40 p-5 text-sm text-[#888888]">
             Arrastra una tarjeta aquí.
@@ -187,17 +209,38 @@ export default function Home() {
       return;
     }
 
-    const targetColumn = columns.find((column) => column.id === over.id);
-
-    if (!targetColumn) {
+    if (active.id === over.id) {
       return;
     }
 
-    setCards((currentCards) =>
-      currentCards.map((card) =>
-        card.id === active.id ? { ...card, columnId: targetColumn.id } : card,
-      ),
-    );
+    setCards((currentCards) => {
+      const activeCard = currentCards.find((card) => card.id === active.id);
+
+      if (!activeCard) {
+        return currentCards;
+      }
+
+      const overCard = currentCards.find((card) => card.id === over.id);
+      const cardsWithoutActive = currentCards.filter((card) => card.id !== active.id);
+
+      if (overCard) {
+        const activeIndex = currentCards.findIndex((card) => card.id === activeCard.id);
+        const overIndex = currentCards.findIndex((card) => card.id === overCard.id);
+        const cardsWithTargetColumn = currentCards.map((card) =>
+          card.id === activeCard.id ? { ...card, columnId: overCard.columnId } : card,
+        );
+
+        return arrayMove(cardsWithTargetColumn, activeIndex, overIndex);
+      }
+
+      const targetColumn = columns.find((column) => column.id === over.id);
+
+      if (!targetColumn) {
+        return currentCards;
+      }
+
+      return [...cardsWithoutActive, { ...activeCard, columnId: targetColumn.id }];
+    });
   }
 
   function renameColumn(columnId: string, title: string) {
@@ -228,7 +271,7 @@ export default function Home() {
               Un tablero claro para avanzar sin ruido.
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-[#888888] sm:text-lg">
-              Mueve tarjetas entre cinco columnas, renombra etapas y agrega trabajo nuevo en segundos.
+              Mueve tarjetas entre columnas, ordénalas por prioridad y agrega trabajo nuevo en segundos.
             </p>
           </div>
           <div className="rounded-3xl bg-[#032147] px-6 py-5 text-white">
